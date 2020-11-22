@@ -22,7 +22,7 @@ def get_data():
         'signal': line.value
     })
 
-    while (time_ns() - start_time < 5e9):
+    while (time_ns() - start_time < 2e9):
         signal = line.value
         time = time_ns()
 
