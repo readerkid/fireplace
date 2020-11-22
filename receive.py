@@ -1,4 +1,5 @@
 import json
+from os import path
 import sys
 from time import time_ns
 
@@ -53,7 +54,7 @@ def graph_data(data):
     plt.savefig('fireplace.png')
 
 def save_data(data, command):
-    with open(command + '.json', 'w') as outfile:
+    with open(path.join('commands', command + '.json'), 'w') as outfile:
         json.dump(data, outfile, indent=2)
 
 data = get_data()

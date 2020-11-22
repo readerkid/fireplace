@@ -1,11 +1,12 @@
 import json
+from os import path
 import sys
 from time import time_ns
 
 from gpiozero import DigitalOutputDevice
 
 def load_data(command):
-    with open(command + '.json') as file:
+    with open(path.join('commands', command + '.json')) as file:
         return json.load(file)
 
 def transmit_data(data):
