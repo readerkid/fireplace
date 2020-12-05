@@ -23,7 +23,8 @@ Resources:
     DependsOn:
       - WebsocketRoutesetState
       - WebsocketRoutesetStateResponse
-      - WebsocketRoutesetStateIntegrationResponse
+      - WebsocketRoutesetStateIntegrationResponseSuccess
+      - WebsocketRoutesetStateIntegrationResponseFailure
   WebsocketRoutesetState:
     Type: AWS::ApiGatewayV2::Route
     Properties:
