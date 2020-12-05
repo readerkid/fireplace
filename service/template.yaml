@@ -63,7 +63,7 @@ Resources:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
       ApiId: !Ref Websocket
-      CredentialsArn: !GetAtt WebsocketRoutesetStateIntegrationIAMRole.Role
+      CredentialsArn: !GetAtt WebsocketRoutesetStateIntegrationIAMRole.Arn
       Description: Route to set the fireplace state
       IntegrationMethod: POST
       IntegrationType: AWS
