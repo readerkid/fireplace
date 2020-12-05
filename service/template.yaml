@@ -1,0 +1,150 @@
+Resources:
+  Websocket:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Description: !Sub
+        - ${ResourceName} From Stack ${StackTagName} Environment ${EnvironmentTagName}
+        - ResourceName: Websocket
+      Name: !Sub
+        - ${StackTagName}-${EnvironmentTagName}-${ResourceName}
+        - ResourceName: Websocket
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+  WebsocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref Websocket
+      StageName: !Ref EnvironmentAPIGatewayStageName
+      DeploymentId: !Ref WebsocketDeployment
+  WebsocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    Properties:
+      ApiId: !Ref Websocket
+    DependsOn:
+      - WebsocketRoutesetState
+      - WebsocketRoutesetStateResponse
+      - WebsocketRoutesetStateIntegrationResponse
+  WebsocketRoutesetState:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Websocket
+      RouteKey: setState
+      Target: !Sub integrations/${WebsocketRoutesetStateIntegration}
+  WebsocketRoutesetStateResponse:
+    Type: AWS::ApiGatewayV2::RouteResponse
+    Properties:
+      ApiId: !Ref Websocket
+      RouteId: !Ref WebsocketRoutesetState
+      RouteResponseKey: $default
+  WebsocketRoutesetStateIntegrationIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Description: Role to add new fireplace states
+      Policies:
+        - PolicyName: PutFireplaceStateRecord
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt State.Arn
+                Condition:
+                  ForAllValues:StringEquals:
+                    dynamodb:LeadingKeys:
+                      - fireplace_states
+  WebsocketRoutesetStateIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Websocket
+      CredentialsArn: !GetAtt WebsocketRoutesetStateIntegrationIAMRole.Role
+      Description: Route to set the fireplace state
+      IntegrationMethod: POST
+      IntegrationType: AWS
+      IntegrationUri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:dynamodb:action/PutItem
+      RequestTemplates: !Sub |-
+        {
+          "setState": {
+            "TableName": "${State}",
+            "Item": {
+              "id": {
+                "S": "fireplace_states"
+              },
+              "timestamp": {
+                "N": "$context.requestTimeEpoch"
+              },
+              "level": {
+                "S": "$input.path('$.level')"
+              }
+            }
+          }
+        }
+      TemplateSelectionExpression: setState
+  WebsocketRoutesetStateIntegrationResponseSuccess:
+    Type: AWS::ApiGatewayV2::IntegrationResponse
+    Properties:
+      ApiId: !Ref Websocket
+      IntegrationId: !Ref WebsocketRoutesetStateIntegration
+      IntegrationResponseKey: /200/
+      ResponseTemplates: |-
+        {
+          "success": {
+            "status": "success",
+            "timestamp": $context.requestTimeEpoch
+          }
+        }
+      TemplateSelectionExpression: success
+  WebsocketRoutesetStateIntegrationResponseFailure:
+    Type: AWS::ApiGatewayV2::IntegrationResponse
+    Properties:
+      ApiId: !Ref Websocket
+      IntegrationId: !Ref WebsocketRoutesetStateIntegration
+      IntegrationResponseKey: $default
+      ResponseTemplates: |-
+        {
+          "failure": {
+            "status": "failure",
+            "timestamp": $context.requestTimeEpoch,
+            "error": {
+              "type": "$.input.path('$.__type')",
+              "message": "$.input.path('$.__message')"
+            }
+          }
+        }
+      TemplateSelectionExpression: failure
+  State:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: 'N'
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      TimeToLiveSpecification:
+        AttributeName: expiration
+        Enabled: true
+Parameters:
+  StackTagName:
+    Type: String
+    Description: Stack Name (injected by Stackery at deployment time)
+  EnvironmentTagName:
+    Type: String
+    Description: Environment Name (injected by Stackery at deployment time)
+  EnvironmentAPIGatewayStageName:
+    Type: String
+    Description: Environment name used for API Gateway Stage names (injected by Stackery at deployment time)
+Transform: AWS::Serverless-2016-10-31
