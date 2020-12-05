@@ -129,3 +129,4 @@ dmypy.json
 .pyre/
 
 fireplace.png
+.aws-sam
