@@ -14,23 +14,166 @@ Resources:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
       ApiId: !Ref Websocket
+      AutoDeploy: true
       StageName: !Ref EnvironmentAPIGatewayStageName
-      DeploymentId: !Ref WebsocketDeployment
-  WebsocketDeployment:
-    Type: AWS::ApiGatewayV2::Deployment
+      DefaultRouteSettings:
+        LoggingLevel: ERROR
+  WebsocketRouteconnect:
+    Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref Websocket
-    DependsOn:
-      - WebsocketRoutesetState
-      - WebsocketRoutesetStateResponse
-      - WebsocketRoutesetStateIntegrationResponseSuccess
-      - WebsocketRoutesetStateIntegrationResponseFailure
+      RouteKey: $connect
+      Target: !Sub integrations/${WebsocketRouteconnectIntegration}
+  WebsocketRouteconnectIntegrationIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Description: Role to add new fireplace API clients
+      Policies:
+        - PolicyName: PutFireplaceClientRecord
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt State.Arn
+                Condition:
+                  ForAllValues:StringEquals:
+                    dynamodb:LeadingKeys:
+                      - clients
+  WebsocketRouteconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Websocket
+      CredentialsArn: !GetAtt WebsocketRouteconnectIntegrationIAMRole.Arn
+      Description: Route to add an API client
+      IntegrationMethod: POST
+      IntegrationType: AWS
+      IntegrationUri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:dynamodb:action/PutItem
+      RequestTemplates:
+        saveClientRecord: !Sub |-
+          {
+            "TableName": "${State}",
+            "Item": {
+              "hashKey": {
+                "S": "clients"
+              },
+              "sortKey": {
+                "S": "$context.connectionId"
+              },
+              "connectedAt": {
+                "N": "$context.connectedAt"
+              }
+            }
+          }
+      TemplateSelectionExpression: saveClientRecord
+  WebsocketRouteconnectResponse:
+    Type: AWS::ApiGatewayV2::RouteResponse
+    Properties:
+      ApiId: !Ref Websocket
+      RouteId: !Ref WebsocketRouteconnect
+      RouteResponseKey: $default
+  WebsocketRouteconnectIntegrationResponseSuccess:
+    Type: AWS::ApiGatewayV2::IntegrationResponse
+    Properties:
+      ApiId: !Ref Websocket
+      IntegrationId: !Ref WebsocketRouteconnectIntegration
+      IntegrationResponseKey: /200/
+  WebsocketRoutedisconnect:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Websocket
+      RouteKey: $disconnect
+      Target: !Sub integrations/${WebsocketRoutedisconnectIntegration}
+  WebsocketRoutedisconnectIntegrationIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Description: Role to delete fireplace API clients
+      Policies:
+        - PolicyName: DeleteFireplaceClientRecord
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:DeleteItem
+                Resource: !GetAtt State.Arn
+                Condition:
+                  ForAllValues:StringEquals:
+                    dynamodb:LeadingKeys:
+                      - clients
+  WebsocketRoutedisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Websocket
+      CredentialsArn: !GetAtt WebsocketRoutedisconnectIntegrationIAMRole.Arn
+      Description: Route to delete an API client
+      IntegrationMethod: POST
+      IntegrationType: AWS
+      IntegrationUri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:dynamodb:action/DeleteItem
+      RequestTemplates:
+        deleteClientRecord: !Sub |-
+          {
+            "TableName": "${State}",
+            "Key": {
+              "hashKey": {
+                "S": "clients"
+              },
+              "sortKey": {
+                "S": "$context.connectionId"
+              }
+            }
+          }
+      TemplateSelectionExpression: deleteClientRecord
   WebsocketRoutesetState:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref Websocket
+      ModelSelectionExpression: setState
+      RequestModels:
+        setState: setState
       RouteKey: setState
       Target: !Sub integrations/${WebsocketRoutesetStateIntegration}
+    DependsOn: WebsocketRoutesetStateRequestModel
+  WebsocketRoutesetStateRequestModel:
+    Type: AWS::ApiGatewayV2::Model
+    Properties:
+      ApiId: !Ref Websocket
+      ContentType: application/json
+      Description: setState route request model
+      Name: setState
+      Schema:
+        $schema: http://json-schema.org/draft-04/schema#
+        title: setState
+        type: object
+        properties:
+          action:
+            enum:
+              - setState
+          level:
+            enum:
+              - '0'
+              - '1'
+              - '2'
+              - '3'
+              - '4'
+              - '5'
+              - '6'
+        required:
+          - action
+          - level
   WebsocketRoutesetStateResponse:
     Type: AWS::ApiGatewayV2::RouteResponse
     Properties:
@@ -59,7 +202,7 @@ Resources:
                 Condition:
                   ForAllValues:StringEquals:
                     dynamodb:LeadingKeys:
-                      - fireplace_states
+                      - fireplaceStates
   WebsocketRoutesetStateIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
@@ -69,23 +212,26 @@ Resources:
       IntegrationMethod: POST
       IntegrationType: AWS
       IntegrationUri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:dynamodb:action/PutItem
-      RequestTemplates: !Sub |-
-        {
-          "setState": {
+      RequestTemplates:
+        setState: !Sub |-
+          #set( $expiration = $context.requestTimeEpoch / 1000 + 30 * 24 * 60 * 60 )
+          {
             "TableName": "${State}",
             "Item": {
-              "id": {
-                "S": "fireplace_states"
+              "hashKey": {
+                "S": "fireplaceStates"
               },
-              "timestamp": {
-                "N": "$context.requestTimeEpoch"
+              "sortKey": {
+                "S": "$context.requestTimeEpoch"
               },
               "level": {
                 "S": "$input.path('$.level')"
+              },
+              "expiration": {
+                "N": "$expiration"
               }
             }
           }
-        }
       TemplateSelectionExpression: setState
   WebsocketRoutesetStateIntegrationResponseSuccess:
     Type: AWS::ApiGatewayV2::IntegrationResponse
@@ -93,13 +239,12 @@ Resources:
       ApiId: !Ref Websocket
       IntegrationId: !Ref WebsocketRoutesetStateIntegration
       IntegrationResponseKey: /200/
-      ResponseTemplates: |-
-        {
-          "success": {
+      ResponseTemplates:
+        success: |-
+          {
             "status": "success",
             "timestamp": $context.requestTimeEpoch
           }
-        }
       TemplateSelectionExpression: success
   WebsocketRoutesetStateIntegrationResponseFailure:
     Type: AWS::ApiGatewayV2::IntegrationResponse
@@ -107,31 +252,30 @@ Resources:
       ApiId: !Ref Websocket
       IntegrationId: !Ref WebsocketRoutesetStateIntegration
       IntegrationResponseKey: $default
-      ResponseTemplates: |-
-        {
-          "failure": {
+      ResponseTemplates:
+        failure: |-
+          {
             "status": "failure",
             "timestamp": $context.requestTimeEpoch,
             "error": {
               "type": "$.input.path('$.__type')",
-              "message": "$.input.path('$.__message')"
+              "message": "$.input.path('$.message')"
             }
           }
-        }
       TemplateSelectionExpression: failure
   State:
     Type: AWS::DynamoDB::Table
     Properties:
       AttributeDefinitions:
-        - AttributeName: id
+        - AttributeName: hashKey
           AttributeType: S
-        - AttributeName: timestamp
-          AttributeType: 'N'
+        - AttributeName: sortKey
+          AttributeType: S
       BillingMode: PAY_PER_REQUEST
       KeySchema:
-        - AttributeName: id
+        - AttributeName: hashKey
           KeyType: HASH
-        - AttributeName: timestamp
+        - AttributeName: sortKey
           KeyType: RANGE
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
