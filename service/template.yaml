@@ -227,6 +227,9 @@ Resources:
               "level": {
                 "S": "$input.path('$.level')"
               },
+              "clientId": {
+                "S": "$context.connectionId"
+              },
               "expiration": {
                 "N": "$expiration"
               }
@@ -282,6 +285,41 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: expiration
         Enabled: true
+  HandleStateUpdates:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-HandleStateUpdates
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: HandleStateUpdates
+      CodeUri: src/HandleStateUpdates
+      Handler: index.handler
+      Runtime: nodejs12.x
+      MemorySize: 128
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref State
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource:
+                - !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Websocket}/*
+      Events:
+        State:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt State.StreamArn
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 1
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref State
+          TABLE_ARN: !GetAtt State.Arn
+          API_URL: !Sub wss://${Websocket}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentAPIGatewayStageName}
+          API_CONNECTIONS_ENDPOINT: !Sub https://${Websocket}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentAPIGatewayStageName}
 Parameters:
   StackTagName:
     Type: String
