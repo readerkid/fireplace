@@ -15,6 +15,14 @@ import {
   Service
 } from "homebridge";
 
+import {
+  Level,
+  ServiceConfig,
+  Credentials
+} from './types';
+
+import { ServiceClient } from './serviceClient';
+
 /*
  * IMPORTANT NOTICE
  *
@@ -51,7 +59,9 @@ class Fireplace implements AccessoryPlugin {
   private readonly log: Logging;
   private readonly name: string;
   private on = false;
-  private level = 0;
+  private level: Level = 0;
+
+  private readonly serviceClient: ServiceClient;
 
   private readonly fireplaceService: Service;
   private readonly informationService: Service;
@@ -59,6 +69,13 @@ class Fireplace implements AccessoryPlugin {
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
     this.name = config.name;
+
+    const serviceConfig = config.websocketService as ServiceConfig;
+    const credentials = config.websocketServiceIAMCredentials as Credentials;
+
+    this.serviceClient = new ServiceClient(serviceConfig, credentials, log);
+
+    this.runService();
     
     this.fireplaceService = new hap.Service.Lightbulb(this.name);
     this.fireplaceService.getCharacteristic(hap.Characteristic.On)
@@ -99,41 +116,27 @@ class Fireplace implements AccessoryPlugin {
 
     this.fireplaceService.getCharacteristic(hap.Characteristic.Brightness)
       .on(CharacteristicEventTypes.GET, (callback: CharacteristicGetCallback) => {
-        log.info(`Current state of the fireplace 'Brightness' characteristic was returned: ${this.percentFromLevel()}`);
-        callback(undefined, this.percentFromLevel());
+        log.info(`Current state of the fireplace 'Brightness' characteristic was returned: ${percentFromLevel(this.level)}`);
+        callback(undefined, percentFromLevel(this.level));
       })
       .on(CharacteristicEventTypes.SET, async (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
         const level = this.levelFromPercent(value as number);
 
         if (this.level === level) {
           log.info(`Fireplace leaving 'Brightness' characteristic at level ${this.level}`);
-          callback(null, this.level);
+          callback(null, percentFromLevel(this.level));
+          return;
+        }
+    
+        try {
+          await this.setLevel(level);
+        } catch (err) {
+          callback(err);
           return;
         }
 
-        if (level === 0) {
-          log.info(`Fireplace turning off due to level 0`);
-          try {
-            this.sendCommand('off');
-            this.level = 0;
-            this.on = false;
-            callback(null, this.percentFromLevel());
-          } catch (err) {
-            log.error(`Fireplace failed to turn off: ${err}`);
-            callback(err);
-          }
-        } else {
-          log.info(`Fireplace turning on to level ${level}`);
-          try {
-            this.sendCommand(`flame-${level}`);
-            this.level = level;
-            this.on = true;
-            callback(null, this.percentFromLevel());
-          } catch (err) {
-            log.error(`Fireplace failed to set flame to level ${level}: ${err}`);
-            callback(err);
-          }
-        }
+        this.serviceClient.setLevel(level);
+        callback(null, value);
       });
 
     this.informationService = new hap.Service.AccessoryInformation()
@@ -143,26 +146,60 @@ class Fireplace implements AccessoryPlugin {
     log.info("Fireplace finished initializing!");
   }
 
-  private levelFromPercent(percent: number): number {
+  private async setLevel(level: Level) {
+    if (level === 0) {
+      this.log.info(`Fireplace turning off due to level 0`);
+      try {
+        await this.sendCommand('off');
+        this.level = 0;
+        this.on = false;
+      } catch (err) {
+        this.log.error(`Fireplace failed to turn off: ${err}`);
+        throw err;
+      }
+    } else {
+      this.log.info(`Fireplace turning on to level ${level}`);
+      try {
+        await this.sendCommand(`flame-${level}`);
+        this.level = level;
+        this.on = true;
+      } catch (err) {
+        this.log.error(`Fireplace failed to set flame to level ${level}: ${err}`);
+        throw err;
+      }
+    }
+  }
+
+  private levelFromPercent(percent: number): Level {
     if (percent === 0) {
       return 0;
     }
 
-    return Math.round(percent * 6 / 100) || 1;
-  }
-
-  private percentFromLevel(): number {
-    if (this.level === 0) {
-      return 0;
-    }
-
-    return Math.round(this.level * 100 / 6);
+    return (Math.round(percent * 6 / 100) || 1) as Level;
   }
 
   private async sendCommand(command: string) {
     await execFile('transmit.py', [command]);
     await execFile('transmit.py', [command]);
     await execFile('transmit.py', [command]);
+  }
+
+  private async runService() {
+    for await (const { action, level } of this.serviceClient.nextCommand()) {
+      this.log(`Received service command ${action} ${level}`)
+
+      if (this.level === level) {
+        this.log.info(`Fireplace leaving 'Brightness' characteristic at level ${this.level}`);
+        continue;
+      }
+
+      if (action === 'currentLevel') {
+        // Update the level now so we don't reissue the command when setting the characteristic
+        this.level = level;
+      }
+
+      this.fireplaceService.setCharacteristic(hap.Characteristic.Brightness, percentFromLevel(level));
+    }
   }
 
   /*
@@ -175,4 +212,12 @@ class Fireplace implements AccessoryPlugin {
       this.fireplaceService,
     ];
   }
+}
+
+const percentFromLevel = (level: Level): number => {
+  if (level === 0) {
+    return 0;
+  }
+
+  return Math.round(level * 100 / 6);
 }
