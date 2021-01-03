@@ -55,12 +55,39 @@ function manifest() {
         name: 'alexa::async_event:write'
       }
     ],
-    publishingInformation: {
+    privacyAndCompliance: {
+      allowsPurchases: false,
+      containsAds: false,
+      isChildDirected: false,
+      isExportCompliant: true,
       locales: {
         'en-US': {
-          name: process.env.ALEXA_SKILL_NAME
+          privacyPolicyUrl: 'https://example.com/privacy'
         }
-      }
+      },
+      usesPersonalInfo: false
+    },
+    publishingInformation: {
+      automaticDistribution: {
+        isActive: false,
+      },
+      category: 'SMART_HOME',
+      distributionCountries: [],
+      isAvailableWorldwide: true,
+      locales: {
+        'en-US': {
+          description: 'Control the fireplace with Alexa',
+          examplePhrases: [
+            'Turn the fireplace on'
+          ],
+          keywords: [
+            'fireplace'
+          ],
+          name: 'Fireplace',
+          summary: 'Control the fireplace with Alexa'
+        },
+      },
+      testingInstructions: 'N/A'
     }
   }
 }
