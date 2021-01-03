@@ -1,0 +1,11 @@
+{
+  "name": "function",
+  "version": "1.0.0",
+  "devDependencies": {
+    "aws-sdk": "~2"
+  },
+  "dependencies": {
+    "ask-smapi-sdk": "^1.2.2",
+    "cfn-custom-resource": "^5.0.10"
+  }
+}

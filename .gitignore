@@ -130,3 +130,4 @@ dmypy.json
 
 fireplace.png
 .aws-sam
+node_modules
