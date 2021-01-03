@@ -52,8 +52,6 @@ export class ServiceClient {
 
     sign(_signConfig, this.credentials);
 
-    this.log.info(`Websocket url: wss://${_signConfig.host}${_signConfig.path}`)
-
     return `wss://${_signConfig.host}${_signConfig.path}`;
   }
 
