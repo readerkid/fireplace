@@ -14,6 +14,10 @@ exports.handler = async event => {
 };
 
 async function processRecord(record) {
+  if (record.eventName !== 'INSERT') {
+    return;
+  }
+
   const type = record.dynamodb.Keys.hashKey.S;
 
   switch (type) {
